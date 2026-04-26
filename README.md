@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="DevastatorAI" width="400"/>
+</p>
+
 # DevastatorAI
 
 Open source multi-agent AI starter kit. Ships with 5 pre-configured agents and works with Ollama locally or OpenRouter via API key. It is the engine that powers the Devastator Dashboard.
