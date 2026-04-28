@@ -90,6 +90,53 @@ All settings live in `.env`. Copy `.env.example` to get started.
 | `OPENROUTER_API_KEY` | _(blank)_ | OpenRouter API key. Leave blank to use Ollama only. |
 | `DEFAULT_MODEL` | `qwen2.5:7b` | Model to use. Ollama model name or OpenRouter model path. |
 | `SEARCH_PROVIDER` | `duckduckgo` | Web search provider: `duckduckgo`, `google`, or `brave` |
+| `ANTHROPIC_API_KEY` | _(blank)_ | Optional. Enables Claude Opus as Chief synthesis model in Full Ops mode. |
+
+---
+
+## Operation Mode Details
+
+### Solo
+One agent handles the full task from start to finish. No API key required — runs entirely on local Ollama. Chief classifies your prompt using keyword matching and LLM fallback, selects the most appropriate agent, and returns the response. The fastest and cheapest option.
+
+```
+You → Chief (classifies) → Rachel/Winter/Charlie/Sentinel → You
+```
+
+### Team
+Chief builds a sequential pipeline of 2–3 agents tailored to the task. The pipeline is printed before execution begins. Each agent's output becomes context for the next. At the end, Chief reviews all contributions and returns a polished final response.
+
+**Example — research task:**
+```
+You → Chief → Rachel (research) → Winter (write summary) → Chief review → You
+```
+
+**Example — coding task:**
+```
+You → Chief → Charlie (write code) → Rachel (accuracy review) → Chief review → You
+```
+
+Uses OpenRouter free tier models (`nvidia/llama-3.1-nemotron-70b-instruct`) if `OPENROUTER_API_KEY` is set. Falls back to Ollama otherwise.
+
+### Full Ops
+Chief determines the most relevant agents for the task, runs them in **parallel** using the best available models, then synthesizes all outputs into one authoritative final response.
+
+Before anything runs, the cost is estimated and printed:
+```
+Estimated cost: ~$0.0023 — This will use nvidia/llama-3.1-nemotron-70b-instruct (Rachel, Winter),
+deepseek/deepseek-r1 (Charlie), claude-opus-4-5 (Chief synthesis).
+Proceed? (y/n)
+```
+
+**Worker models (OpenRouter):**
+- Rachel, Winter: `nvidia/llama-3.1-nemotron-70b-instruct` (free tier)
+- Charlie: `deepseek/deepseek-r1`
+- Sentinel: `nvidia/llama-3.1-nemotron-70b-instruct`
+
+**Chief synthesis model:**
+- If `ANTHROPIC_API_KEY` is set: `claude-opus-4-5` (Anthropic direct)
+- If only `OPENROUTER_API_KEY` is set: `nvidia/llama-3.1-nemotron-70b-instruct`
+- If neither: `DEFAULT_MODEL` via Ollama
 
 ---
 

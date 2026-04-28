@@ -1,20 +1,30 @@
 """
 llm_client.py - LLM Backend Client for DevastatorAI
 
-Handles communication with two backends:
-  - Ollama  (local, no API key required)
-  - OpenRouter (cloud, requires OPENROUTER_API_KEY)
+Handles communication with three backends:
+  - Ollama      (local, no API key required)
+  - OpenRouter  (cloud, requires OPENROUTER_API_KEY)
+  - Anthropic   (cloud, requires ANTHROPIC_API_KEY — used for Opus synthesis in Full Ops)
 
-Backend selection is automatic: if OPENROUTER_API_KEY is set in .env,
-OpenRouter is used. Otherwise falls back to Ollama.
+Backend selection order (auto mode):
+  1. If ANTHROPIC_API_KEY is set and the model name starts with "claude-" → Anthropic
+  2. If OPENROUTER_API_KEY is set → OpenRouter
+  3. Fallback → Ollama
+
+Callers can override auto-detection via the backend parameter in send_prompt().
 
 Config (read from .env):
     OLLAMA_URL          — default: http://localhost:11434
     OPENROUTER_API_KEY  — leave blank to use Ollama
+    ANTHROPIC_API_KEY   — enables Anthropic backend (claude-opus-4-5 for Full Ops synthesis)
     DEFAULT_MODEL       — model name, default: qwen2.5:7b
 
 Public API:
-    send_prompt(agent_config, prompt) -> str
+    send_prompt(agent_config, prompt, system_prompt=None, backend=None) -> str
+    resolve_model(agent_config) -> str
+    check_ollama() -> bool
+    get_ollama_models() -> list
+    clear_history(agent_name=None)
 """
 
 import json
@@ -27,8 +37,9 @@ from pathlib import Path
 
 logger = logging.getLogger("llm_client")
 
+
 # ---------------------------------------------------------------------------
-# Load .env manually — avoids requiring python-dotenv as a hard dependency
+# Load .env
 # ---------------------------------------------------------------------------
 
 def _load_env():
@@ -45,13 +56,15 @@ def _load_env():
             env[key.strip()] = value.strip()
     return env
 
+
 _env = _load_env()
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL") or _env.get("OLLAMA_URL", "http://localhost:11434")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY") or _env.get("OPENROUTER_API_KEY", "")
-DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL") or _env.get("DEFAULT_MODEL", "qwen2.5:7b")
+OLLAMA_URL          = os.environ.get("OLLAMA_URL")          or _env.get("OLLAMA_URL", "http://localhost:11434")
+OPENROUTER_API_KEY  = os.environ.get("OPENROUTER_API_KEY")  or _env.get("OPENROUTER_API_KEY", "")
+ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")   or _env.get("ANTHROPIC_API_KEY", "")
+DEFAULT_MODEL       = os.environ.get("DEFAULT_MODEL")       or _env.get("DEFAULT_MODEL", "qwen2.5:7b")
 
-# In-process conversation history per agent: {agent_name: [{"role": ..., "content": ...}]}
+# In-process conversation history per agent
 _history: dict = {}
 MAX_HISTORY_PAIRS = 10
 
@@ -68,7 +81,7 @@ def _strip_thinking(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Conversation history helpers
+# Conversation history
 # ---------------------------------------------------------------------------
 
 def get_history(agent_name: str) -> list:
@@ -92,7 +105,7 @@ def clear_history(agent_name: str = None):
 
 
 # ---------------------------------------------------------------------------
-# HTTP helper
+# HTTP helper (used by Ollama and OpenRouter)
 # ---------------------------------------------------------------------------
 
 def _post_json(url: str, payload: dict, headers: dict = None, timeout: int = 1800) -> dict:
@@ -154,14 +167,85 @@ def _send_openrouter(model: str, system_prompt: str, agent_name: str, user_messa
 
 
 # ---------------------------------------------------------------------------
+# Backend: Anthropic
+# ---------------------------------------------------------------------------
+
+def _send_anthropic(model: str, system_prompt: str, agent_name: str, user_message: str) -> str:
+    """
+    Send a message to the Anthropic API using the anthropic Python package.
+
+    Anthropic's API takes `system` as a top-level parameter (not inside messages).
+    Conversation history is included as user/assistant message pairs.
+
+    Requires: pip install anthropic
+    """
+    try:
+        import anthropic as anthropic_sdk
+    except ImportError:
+        raise ImportError(
+            "The 'anthropic' package is required for the Anthropic backend. "
+            "Install it with: pip install anthropic"
+        )
+
+    client = anthropic_sdk.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    # Build messages: history (user/assistant only) + current user message
+    messages = list(get_history(agent_name))
+    messages.append({"role": "user", "content": user_message})
+
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=messages,
+        )
+        return message.content[0].text
+    except anthropic_sdk.APIConnectionError as e:
+        raise ConnectionError(f"Cannot reach Anthropic API: {e}") from e
+    except anthropic_sdk.AuthenticationError as e:
+        raise ValueError(f"Anthropic API key is invalid: {e}") from e
+    except anthropic_sdk.RateLimitError as e:
+        raise RuntimeError(f"Anthropic rate limit reached: {e}") from e
+    except Exception as e:
+        raise RuntimeError(f"Anthropic API error: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# Backend selection
+# ---------------------------------------------------------------------------
+
+def _select_backend(model: str, backend: str | None) -> str:
+    """
+    Determine which backend to use.
+
+    Priority when backend=None (auto):
+      1. ANTHROPIC_API_KEY set AND model starts with "claude-" → anthropic
+      2. OPENROUTER_API_KEY set → openrouter
+      3. Fallback → ollama
+
+    Explicit backend values ("anthropic", "openrouter", "ollama") bypass auto-detection.
+    """
+    if backend in ("anthropic", "openrouter", "ollama"):
+        return backend
+
+    # Auto-detect
+    if ANTHROPIC_API_KEY and model.startswith("claude-"):
+        return "anthropic"
+    if OPENROUTER_API_KEY:
+        return "openrouter"
+    return "ollama"
+
+
+# ---------------------------------------------------------------------------
 # Public interface
 # ---------------------------------------------------------------------------
 
 def resolve_model(agent_config: dict) -> str:
     """
     Determine which model to use for this agent.
-    Priority: agent_config["model"] > DEFAULT_MODEL env var > qwen2.5:7b
     The placeholder '${DEFAULT_MODEL}' is treated the same as unset.
+    Priority: agent_config["model"] > DEFAULT_MODEL env var > qwen2.5:7b
     """
     model = agent_config.get("model", "")
     if not model or model == "${DEFAULT_MODEL}":
@@ -169,35 +253,45 @@ def resolve_model(agent_config: dict) -> str:
     return model
 
 
-def send_prompt(agent_config: dict, prompt: str, system_prompt: str = None) -> str:
+def send_prompt(
+    agent_config: dict,
+    prompt: str,
+    system_prompt: str = None,
+    backend: str = None,
+) -> str:
     """
     Send a prompt to the appropriate LLM backend and return the response string.
 
     Args:
         agent_config:  agent dict loaded from agents/*.json
         prompt:        the user message to send
-        system_prompt: pre-built system prompt (from rules_engine); if None,
-                       the agent's system_prompt field is used as-is
+        system_prompt: pre-built system prompt (e.g. from rules_engine);
+                       if None, the agent's system_prompt field is used
+        backend:       force a specific backend: "anthropic", "openrouter", or "ollama"
+                       if None, auto-detection applies (see _select_backend)
 
     Returns:
         str — the model's response text
 
     Raises:
         ConnectionError — if the backend is unreachable
-        ValueError      — if the response is malformed
+        ValueError      — if the response is malformed or the API key is invalid
+        ImportError     — if the anthropic package is not installed and backend="anthropic"
     """
     agent_name = agent_config.get("name", "unknown")
     model = resolve_model(agent_config)
     sys_prompt = system_prompt or agent_config.get("system_prompt", f"You are {agent_name}.")
 
-    if OPENROUTER_API_KEY:
-        logger.info("[%s] Sending via OpenRouter — model: %s", agent_name, model)
+    selected_backend = _select_backend(model, backend)
+    logger.info("[%s] Backend: %s | Model: %s", agent_name, selected_backend, model)
+
+    if selected_backend == "anthropic":
+        response = _send_anthropic(model, sys_prompt, agent_name, prompt)
+    elif selected_backend == "openrouter":
         response = _send_openrouter(model, sys_prompt, agent_name, prompt)
     else:
-        logger.info("[%s] Sending via Ollama — model: %s", agent_name, model)
         response = _send_ollama(model, sys_prompt, agent_name, prompt)
 
-    # Record to history
     append_history(agent_name, "user", prompt)
     append_history(agent_name, "assistant", response)
 
@@ -234,21 +328,25 @@ if __name__ == "__main__":
     print("=== LLM Client Self-Test ===\n")
     print(f"OLLAMA_URL:         {OLLAMA_URL}")
     print(f"OPENROUTER_API_KEY: {'set' if OPENROUTER_API_KEY else 'not set'}")
+    print(f"ANTHROPIC_API_KEY:  {'set' if ANTHROPIC_API_KEY else 'not set'}")
     print(f"DEFAULT_MODEL:      {DEFAULT_MODEL}")
-    print(f"Active backend:     {'OpenRouter' if OPENROUTER_API_KEY else 'Ollama'}")
 
-    if not OPENROUTER_API_KEY:
+    # Show which backend would be selected for a standard model
+    auto = _select_backend(DEFAULT_MODEL, None)
+    claude = _select_backend("claude-opus-4-5", None)
+    print(f"Auto backend ({DEFAULT_MODEL}): {auto}")
+    print(f"Auto backend (claude-opus-4-5):  {claude}")
+
+    if not OPENROUTER_API_KEY and not ANTHROPIC_API_KEY:
         ok = check_ollama()
-        print(f"Ollama reachable:   {ok}")
+        print(f"\nOllama reachable: {ok}")
         if ok:
-            models = get_ollama_models()
-            print(f"Available models:   {models}")
+            print(f"Available models: {get_ollama_models()}")
 
     test_agent = {
         "name": "Charlie",
-        "role": "Coding Agent",
         "model": "${DEFAULT_MODEL}",
-        "system_prompt": "You are Charlie, a coding agent. Keep answers brief.",
+        "system_prompt": "You are Charlie, a coding agent. Keep answers to one sentence.",
     }
 
     print("\nSending test prompt...")

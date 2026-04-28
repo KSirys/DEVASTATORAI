@@ -1,0 +1,20 @@
+# DevastatorAI Python dependencies
+# Install with: pip install -r requirements.txt
+
+# Anthropic API — enables claude-opus-4-5 as Chief synthesis model in Full Ops mode
+anthropic
+
+# OpenAI-compatible client — used for OpenRouter compatibility
+openai
+
+# HTTP requests utility
+requests
+
+# System process and network monitoring (used by Sentinel)
+psutil
+
+# .env file loading
+python-dotenv
+
+# DuckDuckGo web search (no API key required)
+duckduckgo-search
