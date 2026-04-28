@@ -4,42 +4,51 @@
 
 # DevastatorAI
 
-Open source multi-agent AI starter kit. Ships with 5 pre-configured agents and works with Ollama locally or OpenRouter via API key. It is the engine that powers the Devastator Dashboard.
+**Open source multi-agent AI starter kit. Build your AI team, your way.**
+
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
+![Node](https://img.shields.io/badge/Node-20%2B-brightgreen.svg)
+![Ollama](https://img.shields.io/badge/Ollama-supported-orange.svg)
+![OpenRouter](https://img.shields.io/badge/OpenRouter-supported-purple.svg)
 
 ---
 
-## What It Is
+## What is DevastatorAI?
 
-DevastatorAI is a lightweight, modular AI agent framework for running local or cloud-hosted language models. You define agents as simple JSON configs, point the runner at Ollama or OpenRouter, and send prompts from the command line or any application that calls it.
-
-No heavy frameworks. No lock-in. Just agents, a runner, and your models.
+DevastatorAI is a multi-agent AI framework that ships with five pre-configured agents, three operation modes, and a built-in security rules engine. It runs entirely on your machine using Ollama, or connects to cloud models via OpenRouter — no infrastructure required. Every prompt is screened before it reaches an agent, and every response is validated before it reaches you. DevastatorAI is the engine that powers the [Devastator Dashboard](https://github.com/KSirys/DEVASTATOR-dashboard).
 
 ---
 
-## Agents Included
+## The Five Agents
 
-| Agent | Role | Description |
+| Agent | Role | What It Does |
 |---|---|---|
-| Rachel | Research Agent | Searches and summarizes information |
-| Winter | Writing Agent | Drafts content and documents |
-| Charlie | Coding Agent | Writes and reviews code |
-| Chief of Staff | Orchestration Agent | Routes tasks to the right agent |
-| Sentinel | Security Agent | Monitors system processes and network activity for anomalies |
+| **Rachel** | Research Agent | Searches and summarizes information from the web or your own context |
+| **Winter** | Writing Agent | Drafts content, documents, emails, and long-form copy |
+| **Charlie** | Coding Agent | Writes, reviews, and debugs code across any language |
+| **Chief of Staff** | Orchestration Agent | Classifies your input and routes it to the right agent automatically |
+| **Sentinel** | Security Agent | Monitors running processes and network connections for anomalies |
 
 ---
 
-## Requirements
+## Three Operation Modes
 
-- [Node.js](https://nodejs.org/) v18 or higher
-- [Ollama](https://ollama.com/) (for local models) **or** an [OpenRouter](https://openrouter.ai/) API key (for cloud models)
+Set `OPERATION_MODE` in your `.env` to switch modes at any time.
+
+| Mode | Cost | How It Works | Best For |
+|---|---|---|---|
+| **solo** | $0 | One agent handles the full task. Local Ollama only. No API key needed. | Personal use on any machine |
+| **team** | Low (~$0.01–0.10/session) | Chief classifies your input and routes to 2–3 agents sequentially. Uses OpenRouter free tier if a key is set, otherwise Ollama. | Collaborative tasks that benefit from multiple perspectives |
+| **fullops** | Medium (~$0.50–5.00/session) | All relevant agents run in parallel using the best available models. Cost is estimated and confirmed before the run starts. | Production workloads where quality matters more than cost |
 
 ---
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/KSirys/DevastatorAI.git
-cd DevastatorAI
+git clone https://github.com/KSirys/DEVASTATORAI.git
+cd DEVASTATORAI
 ```
 
 **Windows:**
@@ -53,44 +62,109 @@ chmod +x start.sh
 ./start.sh
 ```
 
-On first run, `.env` is created from `.env.example`. Edit it to set your model and API key.
+On first run, `.env` is created from `.env.example`. Open it, set your Ollama URL or OpenRouter API key, then run again.
 
-To send a prompt:
+**Send a prompt:**
 ```bash
-node core/agent_runner.js --agent rachel --prompt "Summarize the history of neural networks"
+node index.js "Research the top open source LLM frameworks"
+node index.js "Write a blog post about AI agents" --mode team
+node index.js "Review this architecture for security issues" --mode fullops
+```
+
+**Call a specific agent directly:**
+```bash
+python core/agent_runner.py --agent charlie --prompt "Write a binary search in Python"
+python core/agent_runner.py --list
 ```
 
 ---
 
-## Connect Ollama
+## Configuration
 
-1. Install Ollama from [https://ollama.com/](https://ollama.com/)
-2. Pull a model: `ollama pull qwen2.5:7b`
-3. In `.env`, set:
-   ```
-   OLLAMA_URL=http://localhost:11434
-   DEFAULT_MODEL=qwen2.5:7b
-   OPENROUTER_API_KEY=
-   ```
-4. Leave `OPENROUTER_API_KEY` blank to use Ollama automatically.
+All settings live in `.env`. Copy `.env.example` to get started.
 
----
-
-## Connect OpenRouter
-
-1. Get an API key from [https://openrouter.ai/](https://openrouter.ai/)
-2. In `.env`, set:
-   ```
-   OPENROUTER_API_KEY=your_key_here
-   DEFAULT_MODEL=openai/gpt-4o
-   ```
-3. When `OPENROUTER_API_KEY` is set, the runner uses OpenRouter instead of Ollama.
+| Variable | Default | Description |
+|---|---|---|
+| `OPERATION_MODE` | `solo` | Operation mode: `solo`, `team`, or `fullops` |
+| `OLLAMA_URL` | `http://localhost:11434` | URL of your local Ollama instance |
+| `OPENROUTER_API_KEY` | _(blank)_ | OpenRouter API key. Leave blank to use Ollama only. |
+| `DEFAULT_MODEL` | `qwen2.5:7b` | Model to use. Ollama model name or OpenRouter model path. |
+| `SEARCH_PROVIDER` | `duckduckgo` | Web search provider: `duckduckgo`, `google`, or `brave` |
 
 ---
 
-## Devastator Dashboard
+## Search Providers
 
-DevastatorAI is the backend engine for the Devastator Dashboard — a local AI command center with an alien bridge cockpit UI.
+Rachel and other research tasks use web search when needed. Configure via `SEARCH_PROVIDER` in `.env`.
+
+| Provider | Cost | Keys Required | Notes |
+|---|---|---|---|
+| **DuckDuckGo** | Free | None | Default. Works out of the box. |
+| **Google** | Paid | `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` | Most accurate. [Get a key](https://developers.google.com/custom-search/v1/overview) |
+| **Brave** | Free tier | `BRAVE_API_KEY` | 2,000 queries/month free. [Get a key](https://api.search.brave.com/) |
+
+---
+
+## Security
+
+Every interaction passes through a three-layer rules engine before anything reaches the LLM or the user.
+
+**Layer 1 — Universal Rules** (`core/rules_engine.py`)
+Injected as a system prompt on every request to every agent. Covers: trust boundaries, absolute prohibitions, prompt injection defense, output sanitization, and fail-safe behavior.
+
+**Layer 2 — Per-Agent Rules**
+Additional rules loaded from `configs/rules.json` for specific agents. Customize what each agent is and isn't allowed to do.
+
+**Layer 3 — Response Validation**
+Every response is scanned before it reaches you. Catches credential leaks (API keys, tokens, private keys), injection echoes, and blocklist matches. Blocked responses are replaced with a clear explanation of what was caught.
+
+Rules are fully configurable via `configs/rules.json`. Built-in defaults are used automatically when the file is absent.
+
+---
+
+## Sentinel Agent
+
+Sentinel is a standalone security scanner that monitors your system for changes between runs.
+
+**How it works:**
+1. First run saves a baseline snapshot of all running processes and active network connections
+2. Every subsequent run compares the current state to the baseline
+3. New processes and connections not present at baseline are flagged as anomalies
+4. Pass `--explain` to send anomalies to the LLM for plain-English analysis
+
+**Run it:**
+```bash
+# Scan and compare to baseline
+python core/sentinel.py
+
+# Reset baseline to current state
+python core/sentinel.py --baseline
+
+# Scan + LLM explanation of anomalies
+python core/sentinel.py --explain
+
+# JSON output for programmatic use
+python core/sentinel.py --output json
+```
+
+Requires: `pip install psutil`
+
+---
+
+## Powered By
+
+| Tool | Purpose |
+|---|---|
+| [Ollama](https://ollama.com/) | Local LLM inference — run any open model on your hardware |
+| [OpenRouter](https://openrouter.ai/) | Cloud LLM gateway — access GPT-4, Claude, Gemini, and more |
+| [psutil](https://github.com/giampaolo/psutil) | System process and network monitoring for Sentinel |
+| [DuckDuckGo](https://duckduckgo.com/) | Free web search, no API key required |
+
+---
+
+## Related
+
+**Devastator Dashboard** — the full AI command center built on DevastatorAI, featuring an alien bridge cockpit UI, widget docking, and live agent panels.
 
 [github.com/KSirys/DEVASTATOR-dashboard](https://github.com/KSirys/DEVASTATOR-dashboard)
 
@@ -98,4 +172,6 @@ DevastatorAI is the backend engine for the Devastator Dashboard — a local AI c
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT License — Copyright © 2026 KSirys
+
+See [LICENSE](LICENSE) for full terms.
