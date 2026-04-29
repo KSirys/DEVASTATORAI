@@ -132,7 +132,7 @@ def _send_ollama(model: str, system_prompt: str, agent_name: str, user_message: 
     try:
         data = _post_json(
             f"{OLLAMA_URL}/api/chat",
-            {"model": model, "messages": messages, "stream": False},
+            {"model": model, "messages": messages, "stream": False, "think": False},
         )
         return _strip_thinking(data.get("message", {}).get("content", ""))
     except urllib.error.URLError as e:

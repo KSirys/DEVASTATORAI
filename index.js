@@ -98,7 +98,7 @@ function callChief(prompt, mode) {
     cwd: ROOT,
     encoding: 'utf8',
     stdio: ['inherit', 'pipe', 'pipe'],
-    timeout: 300_000, // 5-minute timeout
+    timeout: 600_000, // 10-minute timeout
   });
 
   if (result.error) {
